@@ -26,13 +26,13 @@ const LINE_LENGHT: usize = 8;
 const WIDTH: usize = 64;
 const HEIGHT: usize = 32;
 
-fn bcd(_digit: u32, _n: u8) -> u8 {
-    println!("BCD");
-    // machine.stop = true;
-    0
-    // let shift: u32 = (4 * n).into();
-    // ((digit >> shift) & 0xFu32.into()).try_into().unwrap()
-}
+// fn bcd(_digit: u32, _n: u8) -> u8 {
+//     println!("BCD");
+//     // machine.stop = true;
+//     0
+//     // let shift: u32 = (4 * n).into();
+//     // ((digit >> shift) & 0xFu32.into()).try_into().unwrap()
+// }
 
 pub struct Machine {
     opcode: u16,
@@ -48,7 +48,7 @@ pub struct Machine {
     sp: u8, //Stack pointer
     key: [u8; 16],
     // pub video_mem: [u8; 64 * 32],
-    stop: bool,
+    pub stop: bool,
     pub video_mem: [[u8; 64]; 32],
     program_size: usize,
 }
@@ -61,6 +61,12 @@ fn extract_bit(byte: u8, index: usize) -> u8 {
     1 & (byte >> (index))
 }
 
+fn add (machine: &mut Machine, x: u8, y:u8) {
+    machine.register[x as usize] += machine.register[y as usize];
+}
+fn disp_clear(machine: &mut Machine) {
+    machine.video_mem = [[0; 64]; 32];
+}
 fn mem(machine: &mut Machine) {
     machine.index = machine.opcode & 0x0FFF;
 }
@@ -81,13 +87,11 @@ fn call(machine: &mut Machine) {
 
 fn goto(machine: &mut Machine) {
     let addr = (machine.opcode & 0xFFF) as u16;
-    // machine.stack[machine.sp as usize] = machine.pc;
-    // machine.sp += 1;
     machine.pc = addr - 2;
 }
 
 fn return_func(machine: &mut Machine) {
-    machine.pc = machine.stack[machine.sp as usize];
+    machine.pc = machine.stack[(machine.sp - 1) as usize] - 2;
     machine.sp -= 1;
     // machine.pc = addr - 2;
 }
@@ -173,7 +177,7 @@ fn draw(machine: &mut Machine) {
         // if vmem_offset >= machine.video_mem.len() {
         //     break;
         // }
-        if x_col > HEIGHT || y_row > WIDTH {
+        if x_col >= HEIGHT || y_row >= WIDTH {
             continue;
         }
         let old_pixel = machine.video_mem[x_col][y_row];
@@ -194,7 +198,7 @@ fn draw(machine: &mut Machine) {
             offset % LINE_LENGHT,
             old_pixel,
             new_pixel
-        );
+            );
         machine.register[0xF] |= (new_pixel != old_pixel) as u8;
 
         machine.video_mem[x_col][y_row] ^= new_pixel;
@@ -210,12 +214,20 @@ fn clear_display(machine: &mut Machine) {
     machine.video_mem = [[0; 64]; 32]
 }
 
-fn non_implemented(machine: &mut Machine) {
+fn bcd(_machine: &mut Machine) {
     println!("Not implemented");
+}
+
+fn non_implemented(machine: &mut Machine) {
+    println!(
+        "Not implemented {:#02x} {}",
+        machine.opcode,
+        (get_opcode(machine.opcode).unwrap().display)(machine.opcode)
+        );
     machine.stop = true;
 }
 
-fn unknwon_opcode(_machine: &Machine) -> String {
+fn unknwon_opcode(_machine: u16) -> String {
     "????".to_string()
 }
 
@@ -224,7 +236,7 @@ struct Opcode {
     mask: u16,
     value: u16,
     call: fn(&mut Machine),
-    display: fn(&Machine) -> String,
+    display: fn(u16) -> String,
 }
 
 fn create_opcodes() -> HashMap<u16, Vec<Opcode>> {
@@ -233,119 +245,119 @@ fn create_opcodes() -> HashMap<u16, Vec<Opcode>> {
     opcodes.insert(
         0x0000u16,
         vec![
-            Opcode {
-                mask: 0xFF,
-                value: 0xE0,
-                call: |machine| {
-                    machine.video_mem = [[0; 64]; 32];
-                },
-                display: |_machine| "disp_clear()".to_string(),
-            },
-            Opcode {
-                mask: 0xFF,
-                value: 0xEE,
-                call: return_func,
-                display: |_machine| "return".to_string(),
-            },
-            Opcode {
-                mask: 0x000,
-                value: 0x000,
-                call: non_implemented,
-                display: |_machine| "call".to_string(),
-            },
-        ],
-    );
-    opcodes.insert(
-        0x1000u16,
-        vec![Opcode {
-            mask: 0x0,
-            value: 0x0,
-            call: goto,
-            display: |machine| format!("goto {:#02x}", (machine.opcode & 0xFFF) as u16),
-        }],
-    );
-    opcodes.insert(
-        0x2000u16,
-        vec![Opcode {
-            mask: 0x0,
-            value: 0x0,
-            call: call,
-            display: |machine| format!("call {:#02x}", (machine.opcode & 0xFFF) as u16),
-        }],
-    );
-    opcodes.insert(
-        0x3000u16,
-        vec![Opcode {
-            mask: 0x0,
-            value: 0x0,
-            call: if_eq,
-            display: |machine| {
-                let x = get_bit(machine.opcode, 2) as usize;
-                let val = (machine.opcode & 0xFF) as u8;
-                format!("if {} == {}", machine.register[x], val)
-            },
-        }],
-    );
-    opcodes.insert(
-        0x4000u16,
-        vec![Opcode {
-            mask: 0x0,
-            value: 0x0,
-            call: if_ne,
-            display: |machine| {
-                let x = get_bit(machine.opcode, 2) as usize;
-                let val = (machine.opcode & 0xFF) as u8;
-                format!("if {} != {}", machine.register[x], val)
-            },
-        }],
-    );
-    opcodes.insert(
-        0x5000u16,
-        vec![Opcode {
-            mask: 0x0,
-            value: 0x0,
-            call: if_ne_reg,
-            display: |machine| {
-                let x = get_bit(machine.opcode, 2) as usize;
-                let y = get_bit(machine.opcode, 1) as usize;
-                format!("if {} != {}", machine.register[x], machine.register[y])
-            },
-        }],
-    );
-    opcodes.insert(
-        0x6000u16,
-        vec![Opcode {
-            mask: 0x0,
-            value: 0x0,
-            call: assign_reg,
-            display: |machine| {
-                let x = get_bit(machine.opcode, 2) as usize;
-                let val = (machine.opcode & 0xFF) as u8;
-                format!("register[{}] = {}", x, val)
-            },
-        }],
-    );
-    opcodes.insert(
-        0x7000u16,
-        vec![Opcode {
-            mask: 0x0,
-            value: 0x0,
+        Opcode {
+            mask: 0xFF,
+            value: 0xE0,
             call: |machine| {
-                let x = get_bit(machine.opcode, 2) as usize;
-                let nn = (machine.opcode & 0x00FF) as u8;
-                machine.register[x] += nn;
+                machine.video_mem = [[0; 64]; 32];
             },
-            display: |machine| {
-                let x = get_bit(machine.opcode, 2) as usize;
-                let val = (machine.opcode & 0xFF) as u8;
-                format!("register[{}] += {}", x, val)
-            },
-        }],
-    );
+            display: |_machine| "disp_clear()".to_string(),
+        },
+        Opcode {
+            mask: 0xFF,
+            value: 0xEE,
+            call: return_func,
+            display: |_machine| "return".to_string(),
+        },
+        Opcode {
+            mask: 0x000,
+            value: 0x000,
+            call: non_implemented,
+            display: |_machine| "call".to_string(),
+        },
+        ],
+        );
+        opcodes.insert(
+            0x1000u16,
+            vec![Opcode {
+                mask: 0x0,
+                value: 0x0,
+                call: goto,
+                display: |opcode| format!("goto {:#02x}", (opcode & 0xFFF) as u16),
+            }],
+            );
+        opcodes.insert(
+            0x2000u16,
+            vec![Opcode {
+                mask: 0x0,
+                value: 0x0,
+                call: call,
+                display: |opcode| format!("call {:#02x}", (opcode & 0xFFF) as u16),
+            }],
+            );
+        opcodes.insert(
+            0x3000u16,
+            vec![Opcode {
+                mask: 0x0,
+                value: 0x0,
+                call: if_eq,
+                display: |opcode| {
+                    let x = get_bit(opcode, 2) as usize;
+                    let val = (opcode & 0xFF) as u8;
+                    format!("if register[{}] == {}", x, val)
+                },
+            }],
+            );
+        opcodes.insert(
+            0x4000u16,
+            vec![Opcode {
+                mask: 0x0,
+                value: 0x0,
+                call: if_ne,
+                display: |opcode| {
+                    let x = get_bit(opcode, 2) as usize;
+                    let val = (opcode & 0xFF) as u8;
+                    format!("if register[{}] != {}", x, val)
+                },
+            }],
+            );
+        opcodes.insert(
+            0x5000u16,
+            vec![Opcode {
+                mask: 0x0,
+                value: 0x0,
+                call: if_ne_reg,
+                display: |opcode| {
+                    let x = get_bit(opcode, 2) as usize;
+                    let y = get_bit(opcode, 1) as usize;
+                    format!("if register[{}] != register[{}]", x, y)
+                },
+            }],
+            );
+        opcodes.insert(
+            0x6000u16,
+            vec![Opcode {
+                mask: 0x0,
+                value: 0x0,
+                call: assign_reg,
+                display: |opcode| {
+                    let x = get_bit(opcode, 2) as usize;
+                    let val = (opcode & 0xFF) as u8;
+                    format!("register[{}] = {}", x, val)
+                },
+            }],
+            );
+        opcodes.insert(
+            0x7000u16,
+            vec![Opcode {
+                mask: 0x0,
+                value: 0x0,
+                call: |machine| {
+                    let x = get_bit(machine.opcode, 2) as usize;
+                    let nn = (machine.opcode & 0x00FF) as u8;
+                    machine.register[x] += nn;
+                },
+                display: |opcode| {
+                    let x = get_bit(opcode, 2) as usize;
+                    let val = (opcode & 0xFF) as u8;
+                    format!("register[{}] += {}", x, val)
+                },
+            }],
+            );
 
-    opcodes.insert(
-        0x8000u16,
-        vec![
+        opcodes.insert(
+            0x8000u16,
+            vec![
             Opcode {
                 mask: 0xF,
                 value: 0x0,
@@ -354,10 +366,10 @@ fn create_opcodes() -> HashMap<u16, Vec<Opcode>> {
                     let y = get_bit(machine.opcode, 1) as usize;
                     machine.register[x] = machine.register[y];
                 },
-                display: |machine| {
-                    let x = get_bit(machine.opcode, 2) as usize;
-                    let y = get_bit(machine.opcode, 1) as usize;
-                    format!("register[{}] = {}", x, machine.register[y])
+                display: |opcode| {
+                    let x = get_bit(opcode, 2) as usize;
+                    let y = get_bit(opcode, 1) as usize;
+                    format!("register[{}] = register[{}]", x, y)
                 },
             },
             Opcode {
@@ -368,13 +380,10 @@ fn create_opcodes() -> HashMap<u16, Vec<Opcode>> {
                     let y = get_bit(machine.opcode, 1) as usize;
                     machine.register[x] = machine.register[x] | machine.register[y];
                 },
-                display: |machine| {
-                    let x = get_bit(machine.opcode, 2) as usize;
-                    let y = get_bit(machine.opcode, 1) as usize;
-                    format!(
-                        "register[{}] = {} or {}",
-                        x, machine.register[x], machine.register[y]
-                    )
+                display: |opcode| {
+                    let x = get_bit(opcode, 2) as usize;
+                    let y = get_bit(opcode, 1) as usize;
+                    format!("register[{}] = register[{}] or register[{}]", x, x, y)
                 },
             },
             Opcode {
@@ -385,166 +394,244 @@ fn create_opcodes() -> HashMap<u16, Vec<Opcode>> {
                     let y = get_bit(machine.opcode, 1) as usize;
                     machine.register[x] = machine.register[x] & machine.register[y];
                 },
-                display: |machine| {
-                    let x = get_bit(machine.opcode, 2) as usize;
-                    let y = get_bit(machine.opcode, 1) as usize;
-                    format!(
-                        "register[{}] = {} and {}",
-                        x, machine.register[x], machine.register[y]
-                    )
+                display: |opcode| {
+                    let x = get_bit(opcode, 2) as usize;
+                    let y = get_bit(opcode, 1) as usize;
+                    format!("register[{}] = register[{}] and register[{}]", x, x, y)
                 },
             },
             Opcode {
                 mask: 0xF,
                 value: 0x3,
                 call: xor,
-                display: |machine| {
-                    let x = get_bit(machine.opcode, 2) as usize;
-                    let y = get_bit(machine.opcode, 1) as usize;
-                    format!(
-                        "register[{}] = {} xor {}",
-                        x, machine.register[x], machine.register[y]
-                    )
+                display: |opcode| {
+                    let x = get_bit(opcode, 2) as usize;
+                    let y = get_bit(opcode, 1) as usize;
+                    format!("register[{}] = register[{}] xor register[{}]", x, x, y)
                 },
             },
             Opcode {
                 mask: 0xF,
                 value: 0x4,
-                call: non_implemented,
-                display: |machine| {
+                call: |machine| {
                     let x = get_bit(machine.opcode, 2) as usize;
                     let y = get_bit(machine.opcode, 1) as usize;
-                    format!("register[{}] +=  {}", x, machine.register[y])
+                    machine.register[x] += machine.register[y]
+                },
+                display: |opcode| {
+                    let x = get_bit(opcode, 2) as usize;
+                    let y = get_bit(opcode, 1) as usize;
+                    format!("register[{}] +=  register[{}]", x, y)
                 },
             },
             Opcode {
                 mask: 0xF,
                 value: 0x5,
                 call: non_implemented,
-                display: |machine| {
-                    let x = get_bit(machine.opcode, 2) as usize;
-                    let y = get_bit(machine.opcode, 1) as usize;
-                    format!("register[{}] -=  {}", x, machine.register[y])
+                display: |opcode| {
+                    let x = get_bit(opcode, 2) as usize;
+                    let y = get_bit(opcode, 1) as usize;
+                    format!("register[{}] -=  register[{}]", x, y)
                 },
             },
             Opcode {
                 mask: 0xF,
                 value: 0x6,
-                call: non_implemented,
-                display: |machine| {
+                call: |machine| {
                     let x = get_bit(machine.opcode, 2) as usize;
-                    let _y = get_bit(machine.opcode, 1) as usize;
-                    format!("register[{}] >> 1", x)
+                    machine.register[0xf] = machine.register[x] & 0x1;
+                    machine.register[x] >= 1;
+                },
+                display: |opcode| {
+                    let x = get_bit(opcode, 2) as usize;
+                    let _y = get_bit(opcode, 1) as usize;
+                    format!("register[{}] >>= 1", x)
                 },
             },
             Opcode {
                 mask: 0xF,
                 value: 0x7,
-                call: non_implemented,
-                display: unknwon_opcode,
+                call: |machine| {
+                    let x = get_bit(machine.opcode, 2) as usize;
+                    let y = get_bit(machine.opcode, 1) as usize;
+                    machine.register[x] = machine.register[y] - machine.register[x];
+                },
+                display: |opcode| {
+                    let x = get_bit(opcode, 2) as usize;
+                    let y = get_bit(opcode, 1) as usize;
+                    format!("register[{}] = register[{}] - register[{}]", x, x, y)
+                },
             },
             Opcode {
                 mask: 0xF,
                 value: 0xE,
-                call: non_implemented,
-                display: unknwon_opcode,
+                call: |machine| {
+                    let x = get_bit(machine.opcode, 2) as usize;
+                    machine.register[0xf] = machine.register[x] & 0x1;
+                    machine.register[x] <= 1;
+                },
+                display: |opcode| {
+                    let x = get_bit(opcode, 2) as usize;
+                    let _y = get_bit(opcode, 1) as usize;
+                    format!("register[{}] <<= 1", x)
+                },
             },
-        ],
-    );
+            ],
+            );
 
-    opcodes.insert(
-        0xA000u16,
-        vec![Opcode {
-            mask: 0x0,
-            value: 0x0,
-            call: mem,
-            display: unknwon_opcode,
-        }],
-    );
-    opcodes.insert(
-        0xD000u16,
-        vec![Opcode {
-            mask: 0x0,
-            value: 0x0,
-            call: draw,
-            display: unknwon_opcode,
-        }],
-    );
-    opcodes.insert(
-        0xF000u16,
-        vec![
-            Opcode {
-                mask: 0xFF,
-                value: 0x07,
-                call: non_implemented,
-                display: unknwon_opcode,
-            },
-            Opcode {
-                mask: 0xFF,
-                value: 0x0A,
-                call: non_implemented,
-                display: unknwon_opcode,
-            },
-            Opcode {
-                mask: 0xFF,
-                value: 0x15,
-                call: non_implemented,
-                display: unknwon_opcode,
-            },
-            Opcode {
-                mask: 0xFF,
-                value: 0x18,
-                call: non_implemented,
-                display: unknwon_opcode,
-            },
-            Opcode {
-                mask: 0xFF,
-                value: 0x1E,
-                call: add_index,
-                display: unknwon_opcode,
-            },
-            Opcode {
-                mask: 0xFF,
-                value: 0x29,
-                call: non_implemented,
-                display: unknwon_opcode,
-            },
-            Opcode {
-                mask: 0xFF,
-                value: 0x29,
-                call: non_implemented,
-                display: unknwon_opcode,
-            },
-            Opcode {
-                mask: 0xFF,
-                value: 0x33,
-                call: non_implemented,
-                display: unknwon_opcode,
-            },
-            Opcode {
-                mask: 0xFF,
-                value: 0x55,
-                call: reg_dump,
-                display: unknwon_opcode,
-            },
-            Opcode {
-                mask: 0xFF,
-                value: 0x65,
-                call: reg_fill,
-                display: unknwon_opcode,
-            },
-        ],
-    );
-    opcodes.insert(
-        0x9000u16,
-        vec![Opcode {
-            mask: 0x00,
-            value: 0x00,
-            call: if_eq_reg,
-            display: unknwon_opcode,
-        }],
-    );
-    opcodes
+            opcodes.insert(
+                0x9000u16,
+                vec![Opcode {
+                    mask: 0x0,
+                    value: 0x0,
+                    call: if_eq_reg,
+                    display: |opcode| {
+                        let x = get_bit(opcode, 2) as usize;
+                        let y = get_bit(opcode, 1) as usize;
+                        format!("if register[{}] != register[{}]", x, y)
+                    },
+                }],
+                );
+            opcodes.insert(
+                0xA000u16,
+                vec![Opcode {
+                    mask: 0x0,
+                    value: 0x0,
+                    call: mem,
+                    display: |opcode| {
+                        let nn = (opcode & 0x0FFF) as u16;
+                        format!("I = {}", nn)
+                    },
+                }],
+                );
+            opcodes.insert(
+                0xD000u16,
+                vec![Opcode {
+                    mask: 0x0,
+                    value: 0x0,
+                    call: draw,
+                    display: |opcode| {
+                        let x = get_bit(opcode, 2) as usize;
+                        let y = get_bit(opcode, 1) as usize;
+                        let n = get_bit(opcode, 0) as usize;
+                        format!("draw(register[{}], register[{}] , {})", x, y, n)
+                    },
+                }],
+                );
+            opcodes.insert(
+                0xE000u16,
+                vec![
+                Opcode {
+                    mask: 0xFF,
+                    value: 0x9E,
+                    call: non_implemented,
+                    display: |opcode| {
+                        let x = get_bit(opcode, 2) as usize;
+                        format!("if(key() == register[{}]", x)
+                    },
+                },
+                Opcode {
+                    mask: 0xFF,
+                    value: 0xA1,
+                    call: non_implemented,
+                    display: |opcode| {
+                        let x = get_bit(opcode, 2) as usize;
+                        format!("if(key() != register[{}]", x)
+                    },
+                },
+                ],
+                );
+                opcodes.insert(
+                    0xF000u16,
+                    vec![
+                    Opcode {
+                        mask: 0xFF,
+                        value: 0x07,
+                        call: non_implemented,
+                        display: |opcode| {
+                            let x = get_bit(opcode, 2) as usize;
+                            format!("register[{}] = get_delay", x)
+                        },
+                    },
+                    Opcode {
+                        mask: 0xFF,
+                        value: 0x0A,
+                        call: non_implemented,
+                        display: |opcode| {
+                            let x = get_bit(opcode, 2) as usize;
+                            format!("register[{}] = get_key", x)
+                        },
+                    },
+                    Opcode {
+                        mask: 0xFF,
+                        value: 0x15,
+                        call: non_implemented,
+                        display: |opcode| {
+                            let x = get_bit(opcode, 2) as usize;
+                            format!("delay_timer(register[{}] )", x)
+                        },
+                    },
+                    Opcode {
+                        mask: 0xFF,
+                        value: 0x18,
+                        call: non_implemented,
+                        display: |opcode| {
+                            let x = get_bit(opcode, 2) as usize;
+                            format!("sound_timer(register[{}] )", x)
+                        },
+                    },
+                    Opcode {
+                        mask: 0xFF,
+                        value: 0x1E,
+                        call: add_index,
+                        display: |opcode| {
+                            let x = get_bit(opcode, 2) as usize;
+                            format!("I +=register[{}]", x)
+                        },
+                    },
+                    Opcode {
+                        mask: 0xFF,
+                        value: 0x29,
+                        call: |machine| {
+                            let x = get_bit(machine.opcode, 2) as usize;
+                            machine.index = (20 * machine.register[x]).into();
+                        },
+                        display: |opcode| {
+                            let x = get_bit(opcode, 2) as usize;
+                            format!("I = sprite_addr[register[{}]]", x)
+                        },
+                    },
+                    Opcode {
+                        mask: 0xFF,
+                        value: 0x33,
+                        call: bcd,
+                        display: |opcode| {
+                            let x = get_bit(opcode, 2) as usize;
+                            format!("set_BCD(register[{}])", x)
+                        },
+                    },
+                    Opcode {
+                        mask: 0xFF,
+                        value: 0x55,
+                        call: reg_dump,
+                        display: |opcode| {
+                            let x = get_bit(opcode, 2) as usize;
+                            format!("reg_dump(register[{}],&I) ", x)
+                        },
+                    },
+                    Opcode {
+                        mask: 0xFF,
+                        value: 0x65,
+                        call: reg_fill,
+                        display: |opcode| {
+                            let x = get_bit(opcode, 2) as usize;
+                            format!("reg_load(register[{}],&I) ", x)
+                        },
+                    },
+                    ],
+                    );
+
+                    opcodes
 }
 
 lazy_static! {
@@ -554,6 +641,7 @@ lazy_static! {
 fn get_opcode(opcode: u16) -> Result<&'static Opcode, String> {
     let key = (opcode & 0xF000) as u16;
     if !OPCODES.contains_key(&key) {
+        println!("Unknown sub instruction {:#02x}", opcode);
         return Err(format!("Unknown sub instruction {:#02x}", opcode));
     }
     for op in OPCODES[&key].iter() {
@@ -561,6 +649,7 @@ fn get_opcode(opcode: u16) -> Result<&'static Opcode, String> {
             return Ok(op);
         }
     }
+    println!("Unknown sub instruction {:#02x}", opcode);
     Err(format!("Unknown sub instruction {:#02x}", opcode))
 }
 
@@ -594,15 +683,21 @@ impl Machine {
         machine
     }
 
-    pub fn get_source_code(&self) -> String {
-        let mut sourceCode: String = String::new();
+    pub fn get_source_code(&self) -> Vec<String> {
+        let mut sourceCode: Vec<String> = Vec::new();
         for pc in (0..self.program_size).step_by(2) {
-            let opcode = (self.memory[pc] as u16) << 8 | self.memory[pc + 1] as u16;
+            let opcode = (self.memory[pc + 0x200] as u16) << 8 | self.memory[pc + 0x201] as u16;
             match get_opcode(opcode) {
-                Ok(op) => sourceCode += &(op.display)(self),
-                Err(msg) => sourceCode += &msg,
+                Ok(op) => {
+                    sourceCode.push((op.display)(opcode))
+                        // sourceCode = format!(
+                        //     "{}\n{:#02x}: {}",
+                        //     sourceCode,
+                        //     pc + 0x200,
+                        //     &(op.display)(opcode)
+                }
+                Err(msg) => sourceCode.push(msg),
             }
-            sourceCode += "\n";
         }
         sourceCode
     }
@@ -611,14 +706,21 @@ impl Machine {
         let pc = self.pc as usize;
         self.opcode = (self.memory[pc] as u16) << 8 | self.memory[pc + 1] as u16;
 
-        println!("{:?}", self);
-        match get_opcode(self.opcode) {
-            Ok(op) => (op.call)(self),
-            Err(msg) => println!("{}", msg),
+        let c = ((self.opcode & 0xF000) >> 12) as u8;
+        let x = ((self.opcode & 0x0F00) >> 8) as u8;
+        let y = ((self.opcode & 0x00F0) >> 4) as u8;
+        let d = ((self.opcode & 0x000F) >> 0) as u8;
+
+        match(c,x,y,d) {
+            (0x0, 0x0, 0xE, 0x0) => non_implemented(self),
+            (0x0, 0x0, 0xE, 0x0) => disp_clear(self),
+            (0x0, 0x0, 0xE, 0xE) => return_func(self),
+            (0x8,_,_,0x4) => add(self, x,y),
+            _ => non_implemented(self),
+
         }
 
         self.pc += 2;
-
         self.stop
     }
 }
@@ -631,28 +733,40 @@ impl fmt::Debug for Machine {
             registers_string = format!(
                 "{} R{:2}: {:#04x}({:4}){}",
                 registers_string, i, val, val, new_line
-            );
+                );
         }
+        let mut stack_string: String = String::new();
+        for val in 0..self.sp {
+            stack_string = format!(
+                "{}\n{}: {} {:#04x}",
+                stack_string, val, self.stack[val as usize], self.stack[val as usize]
+                );
+        }
+
         write!(
             f,
             "
 Machine
-Opcode: {:#02x} )
+Opcode: {:#02x} {}
 index:       {} pc: {}
 delay_timer: {} sound_timer: {}
 sp:          {}
 registers:
 {}
+stack:
+{}
 ",
-            self.opcode,
-            self.index,
-            self.pc,
-            self.delay_timer,
-            self.sound_timer,
-            self.sp,
-            registers_string
-        )
-    }
+self.opcode,
+(get_opcode(self.opcode).unwrap().display)(self.opcode),
+self.index,
+self.pc,
+self.delay_timer,
+self.sound_timer,
+self.sp,
+registers_string,
+stack_string,
+)
+}
 }
 
 pub fn read_game(name: &str) -> std::io::Result<Vec<u8>> {
@@ -690,6 +804,16 @@ mod test {
         assert_eq!(get_bit(0xA000, 3), 0x000A);
 
         assert_eq!(get_bit(0xAAAA, 2), 0x000A);
+    }
+
+    #[test]
+    fn test_add() {
+        let prog: [u8; 0] = [];
+        let mut machine = Machine::new(&prog);
+        machine.register[0] = 10;
+        machine.register[1] = 10;
+        add(&mut machine, 0,1);
+        assert_eq!(machine.register[0], 20);
     }
 
     #[test]
