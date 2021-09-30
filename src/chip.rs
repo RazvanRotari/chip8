@@ -61,8 +61,10 @@ fn extract_bit(byte: u8, index: usize) -> u8 {
     1 & (byte >> (index))
 }
 
-fn add (machine: &mut Machine, x: u8, y:u8) {
-    machine.register[x as usize] += machine.register[y as usize];
+fn add_reg(machine: &mut Machine, x: u8, y:u8) {
+    let (val, overflow) = machine.register[x as usize].overflowing_add(machine.register[y as usize]);
+    machine.register[x as usize] = val;
+    machine.register[0xF] = overflow as u8;
 }
 fn disp_clear(machine: &mut Machine) {
     machine.video_mem = [[0; 64]; 32];
@@ -158,6 +160,11 @@ fn add_index(machine: &mut Machine) {
     machine.index += machine.register[x] as u16;
 }
 
+fn reg_add(machine: &mut Machine) {
+    let (val, overflow) = machine.register[x as usize].overflowing_add(machine.register[y as usize]);
+    machine.register[x as usize] = val;
+    machine.register[0xF] = overflow as u8;
+}
 //Draws a sprite at coordinate (VX, VY) that has a width of 8 pixels and a height of N pixels.
 //Each row of 8 pixels is read as bit-coded starting from memory location I;
 //I value doesn’t change after the execution of this instruction.
@@ -712,10 +719,16 @@ impl Machine {
         let d = ((self.opcode & 0x000F) >> 0) as u8;
 
         match(c,x,y,d) {
-            (0x0, 0x0, 0xE, 0x0) => non_implemented(self),
-            (0x0, 0x0, 0xE, 0x0) => disp_clear(self),
+            (0x0, _, _, _) => disp_clear(self),
             (0x0, 0x0, 0xE, 0xE) => return_func(self),
-            (0x8,_,_,0x4) => add(self, x,y),
+            (0x1, _, _, _) => goto(self),
+            (0x2, _, _, _) => call(self),
+            (0x3, _, _, _) => if_eq(self),
+            (0x4, _, _, _) => if_ne(self),
+            (0x5, _,_, 0xE) => if_ne_reg(self),
+            (0x6, _, _, _) => assign_reg(self),
+            (0x7, _, _, _) => add_reg(self),
+            (0x8,_,_,0x4) => add_reg(self, x,y),
             _ => non_implemented(self),
 
         }
@@ -812,8 +825,14 @@ mod test {
         let mut machine = Machine::new(&prog);
         machine.register[0] = 10;
         machine.register[1] = 10;
-        add(&mut machine, 0,1);
+        add_reg(&mut machine, 0,1);
         assert_eq!(machine.register[0], 20);
+
+        machine.register[0] = 0xFF;
+        machine.register[1] = 0xFF;
+        add_reg(&mut machine, 0,1);
+        assert_eq!(machine.register[0xF], 1);
+        assert_eq!(machine.register[0], 254);
     }
 
     #[test]
